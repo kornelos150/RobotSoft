@@ -47,6 +47,7 @@ TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim4;
 TIM_HandleTypeDef htim5;
 TIM_HandleTypeDef htim9;
+TIM_HandleTypeDef htim10;
 
 UART_HandleTypeDef huart2;
 DMA_HandleTypeDef hdma_usart2_rx;
@@ -57,7 +58,7 @@ DMA_HandleTypeDef hdma_usart2_tx;
 #define SHORT_PI 3.1415f
 #define RADIUS 1.95f
 #define TICK_PER_ROUND 600.0f
-#define ENCODER_INITIAL 65000
+#define ENCODER_INITIAL 32500
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -71,6 +72,7 @@ static void MX_TIM3_Init(void);
 static void MX_TIM4_Init(void);
 static void MX_TIM5_Init(void);
 static void MX_TIM9_Init(void);
+static void MX_TIM10_Init(void);
 static void MX_USART2_UART_Init(void);
 
 /* USER CODE BEGIN PFP */
@@ -82,6 +84,12 @@ void RightBackward(void);
 void RightPWM(uint32_t pwm);
 void LeftPWM(uint32_t pwm);
 void regulation(void);
+int8_t getBit(int8_t value, int8_t bit);
+void setBit(int8_t *value, int8_t bit);
+void resetBit(int8_t *value, int8_t bit);
+
+void (*regFunction)(void);
+
 /* USER CODE END PFP */
 
 /* USER CODE BEGIN 0 */
@@ -89,6 +97,8 @@ int8_t command[10];
 
 float leftVelocity = 0;
 float rightVelocity = 0;
+int32_t leftTotalTicks = 0;
+int32_t rightTotalTicks = 0;
 
 float pVal = 5.0f;
 float dVal = 0;
@@ -140,20 +150,28 @@ int main(void)
   MX_TIM4_Init();
   MX_TIM5_Init();
   MX_TIM9_Init();
+  MX_TIM10_Init();
   MX_USART2_UART_Init();
 
   /* USER CODE BEGIN 2 */
   HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_2);
   HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_3);
+
+  htim1.Instance->CNT = ENCODER_INITIAL;
+  htim3.Instance->CNT = ENCODER_INITIAL;
+
   HAL_TIM_Encoder_Start(&htim1, TIM_CHANNEL_ALL);
   HAL_TIM_Encoder_Start(&htim3, TIM_CHANNEL_ALL);
 
+
+  HAL_TIM_Base_Start_IT(&htim1);
+  HAL_TIM_Base_Start_IT(&htim3);
   //to je PWM
   //htim4.Instance->CCR3 = 1000;
   //htim4.Instance->CCR2 = 1000;
 
-  LeftPWM(200);
-  RightPWM(200);
+  LeftPWM(0);
+  RightPWM(0);
 
   RightForward();
   LeftForward();
@@ -161,7 +179,7 @@ int main(void)
   htim9.Instance->ARR = 0;
   htim2.Instance->ARR = encoderTimer;
   htim2.Instance->CNT = encoderTimer;
-  HAL_TIM_Base_Start_IT(&htim2);
+  //HAL_TIM_Base_Start_IT(&htim2);
 
   //HAL_GPIO_WritePin(GPIOB,GPIO_PIN_6,GPIO_PIN_SET);
   //HAL_GPIO_WritePin(GPIOB,GPIO_PIN_5,GPIO_PIN_SET);
@@ -178,12 +196,12 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+
   /* USER CODE END WHILE */
 
   /* USER CODE BEGIN 3 */
 
-	  if(ControlFlag)
-		  regulation();
+
   }
   /* USER CODE END 3 */
 
@@ -404,6 +422,19 @@ void MX_TIM9_Init(void)
 
   sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
   HAL_TIM_ConfigClockSource(&htim9, &sClockSourceConfig);
+
+}
+
+/* TIM10 init function */
+void MX_TIM10_Init(void)
+{
+
+  htim10.Instance = TIM10;
+  htim10.Init.Prescaler = 8400;
+  htim10.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim10.Init.Period = 0;
+  htim10.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  HAL_TIM_Base_Init(&htim10);
 
 }
 
@@ -639,11 +670,12 @@ uint32_t getRightPWM()
 
 void stopMotors(void)
 {
+	/*
 	HAL_GPIO_WritePin(GPIOB,GPIO_PIN_4,GPIO_PIN_RESET);
 	HAL_GPIO_WritePin(GPIOB,GPIO_PIN_5,GPIO_PIN_RESET);
 	HAL_GPIO_WritePin(GPIOB,GPIO_PIN_6,GPIO_PIN_RESET);
 	HAL_GPIO_WritePin(GPIOC,GPIO_PIN_7,GPIO_PIN_RESET);
-
+	*/
 	setLeftSpeed = 0.0;
 	setRightSpeed = 0.0;
 
@@ -666,38 +698,25 @@ float calculateVelocity(uint32_t encoderTicks)
 float LeftVelocity(void)
 {
 	float vel = 0.0f;
-	if(isLeftForward())
-	{
-		uint32_t ticks = ENCODER_INITIAL - htim3.Instance->CNT;
-		vel = calculateVelocity(ticks);
 
-	}else if(isLeftBackward())
-	{
-		uint32_t ticks = htim3.Instance->CNT;
-		vel = calculateVelocity(ticks);
-	}
+	leftTotalTicks += (ENCODER_INITIAL - htim3.Instance->CNT);
+	vel = calculateVelocity(leftTotalTicks);
 
 	htim3.Instance->CNT = ENCODER_INITIAL;
+	leftTotalTicks = 0;
 	return vel;
 }
 
 float RightVelocity(void)
 {
 	float vel = 0.0f;
-		if(isRightForward())
-		{
-			uint32_t ticks = ENCODER_INITIAL - htim1.Instance->CNT;
-			vel = calculateVelocity(ticks);
 
+	leftTotalTicks += (ENCODER_INITIAL - htim1.Instance->CNT);
+	vel = calculateVelocity(leftTotalTicks);
 
-		}else if(isRightBackward())
-		{
-			uint32_t ticks = htim1.Instance->CNT;
-			vel = calculateVelocity(ticks);
-		}
-
-		htim1.Instance->CNT = ENCODER_INITIAL;
-		return vel;
+	htim1.Instance->CNT = ENCODER_INITIAL;
+	rightTotalTicks = 0;
+	return vel;
 }
 
 
@@ -919,9 +938,6 @@ int8_t* setPWMResponse(int8_t* command,int8_t* response)
 		data[1] = command[6];
 		RightPWM(byte2int(data));
 
-		LeftForward();
-		RightForward();
-
 		if(command[7] != 0 && command[8] != 0)
 		{
 			data[0] = command[7];
@@ -1008,7 +1024,7 @@ int8_t* getSetSpeedResponse(int8_t* command,int8_t* response)
 
 }
 
-int8_t* setControlFlagResponse(int8_t* command,int8_t* response)
+int8_t* setRegulationTimerResponse(int8_t* command,int8_t* response)
 {
 	uint8_t index = 0;
 		for(;index < 10; ++index)
@@ -1016,11 +1032,83 @@ int8_t* setControlFlagResponse(int8_t* command,int8_t* response)
 	response[0] = 'B';
 	response[1] = command[1];
 	response[2] = command[2];
+	response[3] = command[3];
 
-	ControlFlag = command[2];
+	if(command[2] == 0 && command[3] == 0)
+	{
+		setTimer(&htim10,0);
+		HAL_TIM_Base_Stop_IT(&htim10);
+		ControlFlag = 0;
+	}else
+	{
+		int8_t data[2];
+
+		data[0] = command[2];
+		data[1] = command[3];
+		setTimer(&htim10,byte2int(data));
+		HAL_TIM_Base_Start_IT(&htim10);
+		ControlFlag = 1;
+	}
+
 
 	return response;
 }
+
+
+int8_t* setMotorsDirection(int8_t* command,int8_t* response)
+{
+	uint8_t index = 0;
+		for(;index < 10; ++index)
+			response[index] = 0;
+	response[0] = 'B';
+	response[1] = command[1];
+	if(!ControlFlag)
+	{
+		if(getBit(command[2],3))
+			HAL_GPIO_WritePin(GPIOB,GPIO_PIN_4,GPIO_PIN_SET);
+		else
+			HAL_GPIO_WritePin(GPIOB,GPIO_PIN_4,GPIO_PIN_RESET);
+
+		if(getBit(command[2],2))
+			HAL_GPIO_WritePin(GPIOB,GPIO_PIN_5,GPIO_PIN_SET);
+		else
+			HAL_GPIO_WritePin(GPIOB,GPIO_PIN_5,GPIO_PIN_RESET);
+
+		if(getBit(command[2],1))
+			HAL_GPIO_WritePin(GPIOB,GPIO_PIN_6,GPIO_PIN_SET);
+		else
+			HAL_GPIO_WritePin(GPIOB,GPIO_PIN_6,GPIO_PIN_RESET);
+
+		if(getBit(command[2],0))
+			HAL_GPIO_WritePin(GPIOC,GPIO_PIN_7,GPIO_PIN_SET);
+		else
+			HAL_GPIO_WritePin(GPIOC,GPIO_PIN_7,GPIO_PIN_RESET);
+	}
+	return response;
+}
+
+int8_t* getMotorsDirection(int8_t* command,int8_t* response)
+{
+	uint8_t index = 0;
+		for(;index < 10; ++index)
+			response[index] = 0;
+	response[0] = 'B';
+	response[1] = command[1];
+
+
+	if(HAL_GPIO_ReadPin(GPIOB,GPIO_PIN_4) == GPIO_PIN_SET)
+		setBit(&(response[2]),3);
+	if(HAL_GPIO_ReadPin(GPIOB,GPIO_PIN_5) == GPIO_PIN_SET)
+			setBit(&(response[2]),2);
+	if(HAL_GPIO_ReadPin(GPIOB,GPIO_PIN_6) == GPIO_PIN_SET)
+			setBit(&(response[2]),1);
+	if(HAL_GPIO_ReadPin(GPIOC,GPIO_PIN_7) == GPIO_PIN_SET)
+			setBit(&(response[2]),0);
+
+	return response;
+
+}
+
 
 int8_t* commandHandler(int8_t* command,int8_t* response)
 {
@@ -1083,19 +1171,46 @@ int8_t* commandHandler(int8_t* command,int8_t* response)
 	}
 	if(command[1] == 12)
 	{
-		//set pwm /speed flag
-		return setControlFlagResponse(command,response);
+		//set regulation timer
+		return setRegulationTimerResponse(command,response);
 	}
+	if(command[1] == 13)
+	{
+		//get regulation timer
+		return getTimerResponse(command,response,&htim10);
+	}
+	if(command[1] == 14)
+	{
+		//set direction pins
+		return setMotorsDirection(command,response);
+	}
+	if(command[1] == 15)
+	{
+		//get direction pins
+		return getMotorsDirection(command,response);
+	}
+
+
 
 return invalidMessage(response);
 
 
 }
 
+void onEncoderOverload(TIM_HandleTypeDef *htim,int32_t *totalTickCounter)
+{
+	if(htim->Instance->CNT == 0)
+		*totalTickCounter += ENCODER_INITIAL;
+	else
+		*totalTickCounter -= ENCODER_INITIAL;
+
+	htim->Instance->CNT = ENCODER_INITIAL;
+	HAL_TIM_Base_Start_IT(htim);
+}
+
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
-	uint8_t index = 0;
 	int8_t response[10];
 	if(getTimerTimeout(&htim9))
 		stopBluetoothTimer();
@@ -1133,23 +1248,45 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 	}
 
 	if(htim == &htim9)
+	{
+		if(bluetoothTimerFlag != 0)
 		{
-			if(bluetoothTimerFlag != 0)
-			{
-				stopMotors();
-				HAL_TIM_Base_Stop_IT(&htim9);
-			}else
-			{
-				bluetoothTimerFlag = 1;
-			}
+			stopMotors();
+			HAL_TIM_Base_Stop_IT(&htim9);
+		}else
+		{
+			bluetoothTimerFlag = 1;
 		}
+	}
+	if(htim == &htim10)
+	{
+		regulation();
+	}
+	if(htim == &htim3)
+	{
+		onEncoderOverload(&htim3,&leftTotalTicks);
+	}
+	if(htim == &htim1)
+	{
+		onEncoderOverload(&htim1,&rightTotalTicks);
+	}
 }
 
 
 void addNewPWM(float leftPWM, float rightPWM)
 {
-	int32_t toSetLeft = (int32_t)leftPWM + getLeftPWM();
-	int32_t toSetRight = (int32_t)rightPWM + getRightPWM();
+	int32_t toSetLeft = getLeftPWM();
+	int32_t toSetRight = getRightPWM();
+
+	if(isLeftForward())
+		toSetLeft += (int32_t)leftPWM;
+	else
+		toSetLeft -= (int32_t)leftPWM;
+
+	if(isRightForward())
+		toSetRight += (int32_t)rightPWM;
+	else
+		toSetRight -= (int32_t)rightPWM;
 
 	if(toSetLeft < 0)
 	{
@@ -1181,6 +1318,20 @@ void regulation(void)
 
 	addNewPWM(newPWMLeft,newPWMRight);
 
+}
+
+int8_t getBit(int8_t value, int8_t bit)
+{
+	return (value & ( 1 << bit )) >> bit;
+}
+void setBit(int8_t *value, int8_t bit)
+{
+	*value |= 1 << bit;
+}
+
+void resetBit(int8_t *value, int8_t bit)
+{
+	*value &= ~(1 << bit);
 }
 
 
