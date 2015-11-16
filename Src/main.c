@@ -35,7 +35,6 @@
 
 /* USER CODE BEGIN Includes */
 #include <math.h>
-#include "headers.h"
 /* USER CODE END Includes */
 
 /* Private variables ---------------------------------------------------------*/
@@ -88,8 +87,6 @@ int8_t getBit(int8_t value, int8_t bit);
 void setBit(int8_t *value, int8_t bit);
 void resetBit(int8_t *value, int8_t bit);
 
-void (*regFunction)(void);
-
 /* USER CODE END PFP */
 
 /* USER CODE BEGIN 0 */
@@ -115,7 +112,7 @@ float peRight = 0;
 float newPWMLeft = 0;
 float newPWMRight = 0;
 
-uint32_t encoderTimer = 10000;
+uint32_t encoderTimer = 1000;
 uint32_t btTimeout = 0;
 uint8_t speedTimerFlag = 0;
 uint8_t bluetoothTimerFlag = 0;
@@ -163,12 +160,14 @@ int main(void)
   HAL_TIM_Encoder_Start(&htim1, TIM_CHANNEL_ALL);
   HAL_TIM_Encoder_Start(&htim3, TIM_CHANNEL_ALL);
 
-
   HAL_TIM_Base_Start_IT(&htim1);
   HAL_TIM_Base_Start_IT(&htim3);
   //to je PWM
   //htim4.Instance->CCR3 = 1000;
   //htim4.Instance->CCR2 = 1000;
+
+  leftTotalTicks = 0;
+  rightTotalTicks = 0;
 
   LeftPWM(0);
   RightPWM(0);
@@ -179,7 +178,7 @@ int main(void)
   htim9.Instance->ARR = 0;
   htim2.Instance->ARR = encoderTimer;
   htim2.Instance->CNT = encoderTimer;
-  //HAL_TIM_Base_Start_IT(&htim2);
+  HAL_TIM_Base_Start_IT(&htim2);
 
   //HAL_GPIO_WritePin(GPIOB,GPIO_PIN_6,GPIO_PIN_SET);
   //HAL_GPIO_WritePin(GPIOB,GPIO_PIN_5,GPIO_PIN_SET);
@@ -686,7 +685,7 @@ void stopMotors(void)
 
 }
 
-float calculateVelocity(uint32_t encoderTicks)
+float calcVelocity(int8_t encoderTicks)
 {
 	float tmp = encoderTicks/TICK_PER_ROUND;
 	tmp = tmp*RADIUS;
@@ -697,25 +696,26 @@ float calculateVelocity(uint32_t encoderTicks)
 
 float LeftVelocity(void)
 {
-	float vel = 0.0f;
 
 	leftTotalTicks += (ENCODER_INITIAL - htim3.Instance->CNT);
-	vel = calculateVelocity(leftTotalTicks);
-
 	htim3.Instance->CNT = ENCODER_INITIAL;
+
+	float vel = 0.0f;
+	vel = calcVelocity(leftTotalTicks);
 	leftTotalTicks = 0;
+
 	return vel;
 }
 
 float RightVelocity(void)
 {
-	float vel = 0.0f;
-
-	leftTotalTicks += (ENCODER_INITIAL - htim1.Instance->CNT);
-	vel = calculateVelocity(leftTotalTicks);
-
+	rightTotalTicks += (ENCODER_INITIAL - htim1.Instance->CNT);
 	htim1.Instance->CNT = ENCODER_INITIAL;
+
+	float vel = 0.0f;
+	vel = calcVelocity(rightTotalTicks);
 	rightTotalTicks = 0;
+
 	return vel;
 }
 
@@ -1199,10 +1199,10 @@ return invalidMessage(response);
 
 void onEncoderOverload(TIM_HandleTypeDef *htim,int32_t *totalTickCounter)
 {
-	if(htim->Instance->CNT == 0)
-		*totalTickCounter += ENCODER_INITIAL;
-	else
-		*totalTickCounter -= ENCODER_INITIAL;
+	if(htim->Instance->CNT > 64000 && htim->Instance->CNT < 65000)
+		*totalTickCounter += (ENCODER_INITIAL + 65000 - htim->Instance->CNT);
+	else if (htim->Instance->CNT > 0 && htim->Instance->CNT < 1000)
+		*totalTickCounter -= (ENCODER_INITIAL + htim->Instance->CNT);
 
 	htim->Instance->CNT = ENCODER_INITIAL;
 	HAL_TIM_Base_Start_IT(htim);
@@ -1231,39 +1231,35 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		//HAL_GPIO_TogglePin(GPIOA,GPIO_PIN_5);
 		leftVelocity = LeftVelocity();
 		rightVelocity = RightVelocity();
-		htim2.Instance->CNT = 10000;
+		htim2.Instance->CNT = encoderTimer - 1;
 		HAL_TIM_Base_Start_IT(&htim2);
 	}
 
 	if(htim == &htim5)
 	{
-		if(speedTimerFlag != 0)
-		{
 			stopMotors();
 			HAL_TIM_Base_Stop_IT(&htim5);
-		}else
-		{
-			speedTimerFlag = 1;
-		}
 	}
 
 	if(htim == &htim9)
 	{
-		if(bluetoothTimerFlag != 0)
-		{
+		//if(bluetoothTimerFlag != 0)
+		//{
 			stopMotors();
 			HAL_TIM_Base_Stop_IT(&htim9);
-		}else
-		{
-			bluetoothTimerFlag = 1;
-		}
+		//}else
+		//{
+		//	bluetoothTimerFlag = 1;
+		//}
 	}
 	if(htim == &htim10)
 	{
 		regulation();
+		HAL_TIM_Base_Start_IT(&htim10);
 	}
 	if(htim == &htim3)
 	{
+		HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
 		onEncoderOverload(&htim3,&leftTotalTicks);
 	}
 	if(htim == &htim1)
