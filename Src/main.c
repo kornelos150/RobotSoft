@@ -1274,15 +1274,14 @@ void addNewPWM(float leftPWM, float rightPWM)
 	int32_t toSetLeft = getLeftPWM();
 	int32_t toSetRight = getRightPWM();
 
-	if(isLeftForward())
-		toSetLeft += (int32_t)leftPWM;
-	else
-		toSetLeft -= (int32_t)leftPWM;
+	if(isLeftBackward())
+		toSetLeft = -toSetLeft;
 
-	if(isRightForward())
-		toSetRight += (int32_t)rightPWM;
-	else
-		toSetRight -= (int32_t)rightPWM;
+	if(isRightBackward())
+		toSetRight = -toSetRight;
+
+	toSetLeft += (int32_t)leftPWM;
+	toSetRight += (int32_t)rightPWM;
 
 	if(toSetLeft < 0)
 	{
@@ -1290,15 +1289,16 @@ void addNewPWM(float leftPWM, float rightPWM)
 		LeftBackward();
 	}else
 		LeftForward();
-	LeftPWM((uint32_t)toSetLeft);
 
 	if(toSetRight < 0)
-		{
-			toSetRight = - toSetRight;
-			RightBackward();
-		}else
-			RightForward();
-		RightPWM((uint32_t)toSetRight);
+	{
+		toSetRight = -toSetRight;
+		RightBackward();
+	}else
+		RightForward();
+
+	LeftPWM((uint32_t)toSetLeft);
+	RightPWM((uint32_t)toSetRight);
 }
 
 void regulation(void)
