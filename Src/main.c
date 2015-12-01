@@ -94,6 +94,9 @@ int8_t command[10];
 
 float leftVelocity = 0;
 float rightVelocity = 0;
+int32_t leftCurrentTicks = 0;
+int32_t rightCurrentTicks = 0;
+
 int32_t leftTotalTicks = 0;
 int32_t rightTotalTicks = 0;
 
@@ -118,6 +121,7 @@ uint8_t speedTimerFlag = 0;
 uint8_t bluetoothTimerFlag = 0;
 
 uint8_t ControlFlag = 0;
+uint8_t timerFlag = 0;
 
 //uint8_t response[10];
 /* USER CODE END 0 */
@@ -688,9 +692,9 @@ void stopMotors(void)
 float calcVelocity(int8_t encoderTicks)
 {
 	float tmp = encoderTicks/TICK_PER_ROUND;
+	tmp = tmp*2.0*SHORT_PI;
+	tmp = tmp /(getTimerTimeout(&htim2)*0.0001);
 	tmp = tmp*RADIUS;
-	tmp = tmp*2.0f;
-	tmp = tmp*SHORT_PI;
 	return tmp;
 }
 
@@ -702,6 +706,7 @@ float LeftVelocity(void)
 
 	float vel = 0.0f;
 	vel = calcVelocity(leftTotalTicks);
+	leftCurrentTicks = leftTotalTicks;
 	leftTotalTicks = 0;
 
 	return vel;
@@ -714,6 +719,7 @@ float RightVelocity(void)
 
 	float vel = 0.0f;
 	vel = calcVelocity(rightTotalTicks);
+	rightCurrentTicks = rightTotalTicks;
 	rightTotalTicks = 0;
 
 	return vel;
@@ -776,6 +782,7 @@ int8_t* invalidMessage(int8_t* response)
 	response[0] = 'B';
 	response[4] = 'M';
 	response[9] = 'E';
+	stopMotors();
 	return response;
 }
 
@@ -784,7 +791,8 @@ int8_t* setResponse(int8_t* command,int8_t* response)
 	uint8_t index = 0;
 	for(;index < 10; ++index)
 		response[index] = command[index];
-
+	response[0] = 'B';
+	response[1] = command[1];
 	return response;
 }
 
@@ -794,6 +802,7 @@ int8_t* setResponseWrkd(int8_t* command,int8_t* response)
 	for(;index < 10; ++index)
 		response[index] = 0;
 	response[0] = 'B';
+	response[1] = command[1];
 	response[2] = command[2];
 	response[3] = command[3];
 	response[4] = command[5];
@@ -810,13 +819,18 @@ int8_t* setIntResponseWrkd(int8_t* command,int8_t* response)
 	return response;
 }
 
-int8_t* getVelocityResponse(int8_t* command,int8_t* response)
+int8_t* setBlockedTimerResponse(int8_t* response)
 {
 	uint8_t index = 0;
-		for(;index < 10; ++index)
-			response[index] = 0;
-	response[0] = 'B';
-	response[1] = command[1];
+	for(;index < 10; ++index)
+		response[index] = timerFlag;
+
+	return response;
+}
+
+int8_t* getVelocityResponse(int8_t* command,int8_t* response)
+{
+	setResponse(command,response);
 	int8_t data[2];
 	float2byte(leftVelocity,data);
 	response[2] = data[0];
@@ -829,55 +843,43 @@ int8_t* getVelocityResponse(int8_t* command,int8_t* response)
 
 }
 
-int8_t* setVelocityResponse(int8_t* command,int8_t* response)
+int8_t* setVelocityResponse(int8_t* command,int8_t* response,uint8_t isBlocked)
 {
-	uint8_t index = 0;
-		for(;index < 10; ++index)
-			response[index] = 0;
-	response[0] = 'B';
-	response[1] = command[1];
-	response[2] = command[2];
-	response[3] = command[3];
-	response[4] = command[5];
-	response[5] = command[6];
+	setResponseWrkd(command,response);
 	if(command[2] == 0 && command[3] == 0 && command[5] == 0 && command[6] == 0)
 	{
 		stopMotors();
-		return response;
 	}
-	int8_t data[2];
-
-	data[0] = command[2];
-	data[1] = command[3];
-	setLeftSpeed = byte2Float(data);
-
-	data[0] = command[5];
-	data[1] = command[6];
-	setRightSpeed = byte2Float(data);
-
-	if(command[7] != 0 && command[8] != 0)
+	else
 	{
-		data[0] = command[7];
-		data[1] = command[8];
-		uint32_t timer = byte2int(data);
+		int8_t data[2];
 
-		startSpeedTimer(timer);
+		data[0] = command[2];
+		data[1] = command[3];
+		setLeftSpeed = byte2Float(data);
+
+		data[0] = command[5];
+		data[1] = command[6];
+		setRightSpeed = byte2Float(data);
+
+		if(command[7] != 0 && command[8] != 0)
+		{
+			data[0] = command[7];
+			data[1] = command[8];
+			uint32_t timer = byte2int(data);
+
+			startSpeedTimer(timer);
+			if(isBlocked)
+				timerFlag = command[1];
+		}
 	}
-
 	return response;
 }
 
+
 int8_t* setConfigResponse(int8_t* command,int8_t* response)
 {
-	uint8_t index = 0;
-		for(;index < 10; ++index)
-			response[index] = 0;
-	response[0] = 'B';
-	response[1] = command[1];
-	response[2] = command[2];
-	response[3] = command[3];
-	response[4] = command[5];
-	response[5] = command[6];
+	setResponseWrkd(command,response);
 
 	int8_t data[2];
 
@@ -897,11 +899,7 @@ int8_t* setConfigResponse(int8_t* command,int8_t* response)
 
 int8_t* getConfigResponse(int8_t* command,int8_t* response)
 {
-	uint8_t index = 0;
-		for(;index < 10; ++index)
-			response[index] = 0;
-	response[0] = 'B';
-	response[1] = command[1];
+	setResponse(command,response);
 	int8_t data[2];
 	float2byte(pVal,data);
 	response[2] = data[0];
@@ -914,17 +912,9 @@ int8_t* getConfigResponse(int8_t* command,int8_t* response)
 
 }
 
-int8_t* setPWMResponse(int8_t* command,int8_t* response)
+int8_t* setPWMResponse(int8_t* command,int8_t* response, uint8_t isBlocked)
 {
-	uint8_t index = 0;
-		for(;index < 10; ++index)
-			response[index] = 0;
-	response[0] = 'B';
-	response[1] = command[1];
-	response[2] = command[2];
-	response[3] = command[3];
-	response[4] = command[5];
-	response[5] = command[6];
+	setResponseWrkd(command,response);
 
 	if(!ControlFlag)
 	{
@@ -945,6 +935,8 @@ int8_t* setPWMResponse(int8_t* command,int8_t* response)
 			uint32_t timer = byte2int(data);
 
 			startSpeedTimer(timer);
+			if(isBlocked)
+				timerFlag = command[1];
 		}
 	}
 
@@ -953,11 +945,7 @@ int8_t* setPWMResponse(int8_t* command,int8_t* response)
 
 int8_t* getPWMResponse(int8_t* command,int8_t* response)
 {
-	uint8_t index = 0;
-		for(;index < 10; ++index)
-			response[index] = 0;
-	response[0] = 'B';
-	response[1] = command[1];
+	setResponse(command,response);
 	int8_t data[2];
 	int2byte(getLeftPWM(),data);
 	response[2] = data[0];
@@ -972,13 +960,7 @@ int8_t* getPWMResponse(int8_t* command,int8_t* response)
 
 int8_t* setTimerResponse(int8_t* command,int8_t* response,TIM_HandleTypeDef *htim)
 {
-	uint8_t index = 0;
-		for(;index < 10; ++index)
-			response[index] = 0;
-	response[0] = 'B';
-	response[1] = command[1];
-	response[2] = command[2];
-	response[3] = command[3];
+	setResponseWrkd(command,response);
 
 	int8_t data[2];
 
@@ -991,11 +973,7 @@ int8_t* setTimerResponse(int8_t* command,int8_t* response,TIM_HandleTypeDef *hti
 
 int8_t* getTimerResponse(int8_t* command,int8_t* response,TIM_HandleTypeDef *htim)
 {
-	uint8_t index = 0;
-		for(;index < 10; ++index)
-			response[index] = 0;
-	response[0] = 'B';
-	response[1] = command[1];
+	setResponse(command,response);
 	int8_t data[2];
 	int2byte(htim->Instance->ARR,data);
 	response[2] = data[0];
@@ -1007,11 +985,7 @@ int8_t* getTimerResponse(int8_t* command,int8_t* response,TIM_HandleTypeDef *hti
 
 int8_t* getSetSpeedResponse(int8_t* command,int8_t* response)
 {
-	uint8_t index = 0;
-		for(;index < 10; ++index)
-			response[index] = 0;
-	response[0] = 'B';
-	response[1] = command[1];
+	setResponse(command,response);
 	int8_t data[2];
 	float2byte(setLeftSpeed,data);
 	response[2] = data[0];
@@ -1026,13 +1000,7 @@ int8_t* getSetSpeedResponse(int8_t* command,int8_t* response)
 
 int8_t* setRegulationTimerResponse(int8_t* command,int8_t* response)
 {
-	uint8_t index = 0;
-		for(;index < 10; ++index)
-			response[index] = 0;
-	response[0] = 'B';
-	response[1] = command[1];
-	response[2] = command[2];
-	response[3] = command[3];
+	setResponseWrkd(command,response);
 
 	if(command[2] == 0 && command[3] == 0)
 	{
@@ -1057,11 +1025,7 @@ int8_t* setRegulationTimerResponse(int8_t* command,int8_t* response)
 
 int8_t* setMotorsDirection(int8_t* command,int8_t* response)
 {
-	uint8_t index = 0;
-		for(;index < 10; ++index)
-			response[index] = 0;
-	response[0] = 'B';
-	response[1] = command[1];
+	setResponseWrkd(command,response);
 	if(!ControlFlag)
 	{
 		if(getBit(command[2],3))
@@ -1089,12 +1053,7 @@ int8_t* setMotorsDirection(int8_t* command,int8_t* response)
 
 int8_t* getMotorsDirection(int8_t* command,int8_t* response)
 {
-	uint8_t index = 0;
-		for(;index < 10; ++index)
-			response[index] = 0;
-	response[0] = 'B';
-	response[1] = command[1];
-
+	setResponse(command,response);
 
 	if(HAL_GPIO_ReadPin(GPIOB,GPIO_PIN_4) == GPIO_PIN_SET)
 		setBit(&(response[2]),3);
@@ -1109,6 +1068,21 @@ int8_t* getMotorsDirection(int8_t* command,int8_t* response)
 
 }
 
+int8_t* getEncoderTicks(int8_t* command,int8_t* response)
+{
+	setResponse(command,response);
+	int8_t data[2];
+	int2byte(leftCurrentTicks,data);
+	response[2] = data[0];
+	response[3] = data[1];
+	int2byte(rightCurrentTicks,data);
+	response[4] = data[0];
+	response[5] = data[1];
+
+	return response;
+
+}
+
 
 int8_t* commandHandler(int8_t* command,int8_t* response)
 {
@@ -1117,7 +1091,7 @@ int8_t* commandHandler(int8_t* command,int8_t* response)
 	if(command[1] == 1)
 	{
 		//set speed
-		return setVelocityResponse(command,response);
+		return setVelocityResponse(command,response,0);
 	}
 	if(command[1] == 2)
 	{
@@ -1147,7 +1121,7 @@ int8_t* commandHandler(int8_t* command,int8_t* response)
 	if(command[1] == 7)
 	{
 		//set PWM
-		return setPWMResponse(command,response);
+		return setPWMResponse(command,response,0);
 	}
 	if(command[1] == 8)
 	{
@@ -1189,6 +1163,21 @@ int8_t* commandHandler(int8_t* command,int8_t* response)
 		//get direction pins
 		return getMotorsDirection(command,response);
 	}
+	if(command[1] == 16)
+	{
+		//set blocked velocity
+		return setVelocityResponse(command,response,1);
+	}
+	if(command[1] == 17)
+	{
+		//set blocked PWM
+		return setPWMResponse(command,response,1);
+	}
+	if(command[1] == 18)
+	{
+		//get ticks in current velocity measurement
+		return getEncoderTicks(command,response);
+	}
 
 
 
@@ -1212,13 +1201,18 @@ void onEncoderOverload(TIM_HandleTypeDef *htim,int32_t *totalTickCounter)
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
 	int8_t response[10];
+	int8_t currentCommand[10];
+	uint8_t index = 0;
+	for(;index < 10; ++index)
+		currentCommand[index] = command;
+
 	if(getTimerTimeout(&htim9))
 		stopBluetoothTimer();
 
 	//setTimer(0);
 	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
 
-	commandHandler(command,response);
+	commandHandler(currentCommand,response);
 	HAL_UART_Transmit_DMA(&huart2,response,10);
 	if(getTimerTimeout(&htim9))
 		startBluetoothTimer();
@@ -1239,6 +1233,13 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 	{
 			stopMotors();
 			HAL_TIM_Base_Stop_IT(&htim5);
+			if(timerFlag != 0)
+			{
+				int8_t response[10];
+				setBlockedTimerResponse(response);
+				timerFlag = 0;
+				HAL_UART_Transmit_DMA(&huart2,response,10);
+			}
 	}
 
 	if(htim == &htim9)
