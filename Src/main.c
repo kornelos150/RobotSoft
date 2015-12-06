@@ -1225,6 +1225,21 @@ int8_t* commandHandler(int8_t* command,int8_t* response)
 		//get direction pins
 		return getMotorsDirection(command,response);
 	}
+	if(command[1] == 16)
+	{
+		//set blocked velocity
+		return setVelocityResponse(command,response,1);
+	}
+	if(command[1] == 17)
+	{
+		//set blocked PWM
+		return setPWMResponse(command,response,1);
+	}
+	if(command[1] == 18)
+	{
+		//get ticks in current velocity measurement
+		return getEncoderTicks(command,response);
+	}
 
 
 
